@@ -1,3 +1,5 @@
+# Join my discord for support https://discord.gg/eNtGFS6
+
 # Add the following to your server.cfg
 
 ensure scully_perms
