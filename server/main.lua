@@ -67,12 +67,16 @@ exports('hasPermission', Scully.Discord.HasPermission)
 
 AddEventHandler('playerConnecting', function(name, setKickReason, deferrals)
 	local src = source
-    local userID, userRoles, userPermissions = Scully.Discord.GetUserInfo(src), {}
+    local userID, userRoles = Scully.Discord.GetUserInfo(src)
+    local userPermissions = {}
     for permission, role in pairs(Scully.Permissions) do
         for k, v in ipairs(userRoles) do
             if role == v then
                 userPermissions[permission] = true
                 ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userID, permission))
+                if Scully.Debug then
+                    print('^5[scully_perms] ^7Permission added: ^5[^2' .. userID .. ' : ' .. permission .. '^5]^7')
+                end
             end
         end
     end
@@ -90,6 +94,9 @@ AddEventHandler('playerDropped', function(reason)
         local userPermissions = user.Permissions
         for _, permission in ipairs(userPermissions) do
             ExecuteCommand(('remove_principal identifier.discord:%s group.%s'):format(user.ID, permission))
+            if Scully.Debug then
+                print('^5[scully_perms] ^7Permission removed: ^5[^1' .. user.ID .. ' : ' .. permission .. '^5]^7')
+            end
         end
     end
     Scully.Discord.Players[src] = nil
