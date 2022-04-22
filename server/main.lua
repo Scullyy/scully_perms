@@ -71,11 +71,23 @@ AddEventHandler('playerConnecting', function(name, setKickReason, deferrals)
     local userPermissions = {}
     for permission, role in pairs(Scully.Permissions) do
         for k, v in ipairs(userRoles) do
-            if role == v then
-                userPermissions[permission] = true
-                ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userID, permission))
-                if Scully.Debug then
-                    print('^5[scully_perms] ^7Permission added: ^5[^2' .. userID .. ' : ' .. permission .. '^5]^7')
+            if type(role) == 'table' then
+                for _, roleid in ipairs(role) do
+                    if roleid == v then
+                        userPermissions[permission] = true
+                        ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userID, permission))
+                        if Scully.Debug then
+                            print('^5[scully_perms] ^7Permission added: ^5[^2' .. userID .. ' : ' .. permission .. '^5]^7')
+                        end
+                    end
+                end
+            else
+                if role == v then
+                    userPermissions[permission] = true
+                    ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userID, permission))
+                    if Scully.Debug then
+                        print('^5[scully_perms] ^7Permission added: ^5[^2' .. userID .. ' : ' .. permission .. '^5]^7')
+                    end
                 end
             end
         end
