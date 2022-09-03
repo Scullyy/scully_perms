@@ -5,6 +5,7 @@
 ensure scully_perms
 
 add_ace resource.scully_perms command.add_principal allow
+
 add_ace resource.scully_perms command.remove_principal allow
 
 # You can check permissions by doing either of the following or by using the native IsPlayerAceAllowed
