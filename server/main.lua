@@ -12,6 +12,7 @@ end)
 
 function Scully.Discord.Request(userid)
     local data = nil
+
     PerformHttpRequest('https://discordapp.com/api/guilds/' .. Scully.Guild .. '/members/' .. userid, function(errorCode, resultData, resultHeaders)
 		data = {data=resultData, code=errorCode, headers=resultHeaders}
     end, 'GET', '', {['Content-Type'] = 'application/json', ['Authorization'] = 'Bot ' .. Scully.Token})
@@ -25,31 +26,43 @@ end
 
 function Scully.Discord.GetUserID(source)
     local userID = nil
-	for _, identifier in ipairs(GetPlayerIdentifiers(source)) do
-		if string.match(identifier, 'discord:') then
+    local identifiers = GetPlayerIdentifiers(source)
+
+    for i = 1, #identifiers do
+        local identifier = identifiers[i]
+
+        if string.match(identifier, 'discord:') then
 			userID = string.gsub(identifier, 'discord:', '')
 			break
 		end
-	end
+    end
+
     return userID
 end
 
 function Scully.Discord.GetUserInfo(source)
     local userID, userRoles = Scully.Discord.GetUserID(source), nil
+
     if userID then
         local user = Scully.Discord.Request(userID)
+
         if user.code == 200 then
             local data = json.decode(user.data)
+
             userRoles = data.roles
         end
     end
+
     return userID, userRoles
 end
 
 function Scully.Discord.HasPermission(source, permission)
     local user, hasPermission = Scully.Discord.Players[source], false
+
     if type(permission) == 'table' then
-        for _, perm in ipairs(permission) do
+        for i = 1, #permission do
+            local perm = permission[i]
+
             if user.Permissions[perm] then
                 hasPermission = true
                 break
@@ -60,6 +73,7 @@ function Scully.Discord.HasPermission(source, permission)
             hasPermission = true
         end
     end
+
     return hasPermission
 end
 
@@ -69,13 +83,25 @@ AddEventHandler('playerConnecting', function(name, setKickReason, deferrals)
 	local src = source
     local userID, userRoles = Scully.Discord.GetUserInfo(src)
     local userPermissions = {}
+
+    if not userRoles then
+        print('^1ERROR: ^7Could not find the players discord info, make sure the bot is invited to your server that the token is connected to.')
+        return
+    end
+
     for permission, role in pairs(Scully.Permissions) do
-        for k, v in ipairs(userRoles) do
+        for i = 1, #userRoles do
+            local v = userRoles[i]
+
             if type(role) == 'table' then
-                for _, roleid in ipairs(role) do
+                for k = 1, #role do
+                    local roleid = role[k]
+
                     if roleid == v then
                         userPermissions[permission] = true
+
                         ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userID, permission))
+
                         if Scully.Debug then
                             print('^5[scully_perms] ^7Permission added: ^5[^2' .. userID .. ' : ' .. permission .. '^5]^7')
                         end
@@ -84,7 +110,9 @@ AddEventHandler('playerConnecting', function(name, setKickReason, deferrals)
             else
                 if role == v then
                     userPermissions[permission] = true
+
                     ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userID, permission))
+
                     if Scully.Debug then
                         print('^5[scully_perms] ^7Permission added: ^5[^2' .. userID .. ' : ' .. permission .. '^5]^7')
                     end
@@ -92,6 +120,7 @@ AddEventHandler('playerConnecting', function(name, setKickReason, deferrals)
             end
         end
     end
+
     Scully.Discord.Players[src] = {
         ID = userID,
         Roles = userRoles,
