@@ -1,95 +1,127 @@
-Scully.Discord = {
-    Players = {}
+local Players = {}
+local ApiCodes = {
+    [200] = {text = 'The request completed successfully.', bad = false},
+    [201] = {text = 'The entity was created successfully.', bad = false},
+    [204] = {text = 'The request completed successfully but returned no content.', bad = false},
+    [304] = {text = 'The entity was not modified (no action was taken).', bad = false},
+    [400] = {text = 'The request was improperly formatted, or the server couldn\'t understand it.', bad = true},
+    [401] = {text = 'The Authorization header was missing or invalid.', bad = true},
+    [403] = {text = 'The Authorization token you passed did not have permission to the resource.', bad = true},
+    [404] = {text = 'The resource at the location specified doesn\'t exist.', bad = true},
+    [405] = {text = 'The HTTP method used is not valid for the location specified.', bad = true},
+    [429] = {text = 'You are being rate-limited.', bad = true},
+    [502] = {text = 'There was not a gateway available to process your request.', bad = true},
+    [500] = {text = 'The server had an error processing your request.', bad = true},
 }
 
-CreateThread(function()
-    if GetCurrentResourceName() ~= 'scully_perms' then
-        print('^1ERROR: ^7The resource needs to be named ^5scully_perms^7.')
-    elseif Scully.Guild == '' or Scully.Token == '' then
-        print('^1ERROR: ^7Please make sure to configure the resource in the ^5config.lua^7.')
-    end
-end)
+---@param prefix string
+---@param message string
+local function debugPrint(prefix, message)
+    if not Config.Debug and (prefix ~= 'error') then return end
 
-function Scully.Discord.Request(userid)
+    prefix = (prefix == 'error' and '^1[ERROR] ') or (prefix == 'success' and '^2[SUCCESS] ') --[[@as string]]
+
+    print(('%s ^7%s'):format(prefix, message))
+end
+
+if Config.Guild == '' or Config.Token == '' then
+    debugPrint('error', 'You need to configure your guild and token in the config.lua')
+    return
+end
+
+---@param userId string
+---@return table | false
+local function sendRequest(userId)
     local data = nil
+    local request = ('https://discord.com/api/guilds/%s/members/%s'):format(Config.Guild, userId)
 
-    PerformHttpRequest('https://discordapp.com/api/guilds/' .. Scully.Guild .. '/members/' .. userid, function(errorCode, resultData, resultHeaders)
-		data = {data=resultData, code=errorCode, headers=resultHeaders}
-    end, 'GET', '', {['Content-Type'] = 'application/json', ['Authorization'] = 'Bot ' .. Scully.Token})
+    PerformHttpRequest(request, function(code, result, headers)
+        data = { data = result, code = code, headers = headers }
+        local error = ApiCodes[code]
+
+        debugPrint(error.bad and 'error' or 'success', error.text)
+    end, 'GET', '', {['Content-Type'] = 'application/json', ['Authorization'] = 'Bot ' .. Config.Token})
+
+    local start = GetGameTimer()
 
     while not data do
         Wait(0)
-    end
-	
-    return data
-end
 
-function Scully.Discord.GetUserID(source)
-    local userID = nil
-    local identifiers = GetPlayerIdentifiers(source)
+        local timer = GetGameTimer() - start
 
-    for i = 1, #identifiers do
-        local identifier = identifiers[i]
-
-        if string.match(identifier, 'discord:') then
-			userID = string.gsub(identifier, 'discord:', '')
-			break
-		end
-    end
-
-    return userID
-end
-
-function Scully.Discord.GetUserInfo(source)
-    local userID, userRoles = Scully.Discord.GetUserID(source), nil
-
-    if userID then
-        local user = Scully.Discord.Request(userID)
-
-        if user.code == 200 then
-            local data = json.decode(user.data)
-
-            userRoles = data.roles
+        if timer > 15000 then
+            debugPrint('error', 'The request timed out.')
+            return false
         end
     end
 
-    return userID, userRoles
+    return data
 end
 
-function Scully.Discord.HasPermission(source, permission)
-    local user, hasPermission = Scully.Discord.Players[source], false
+---@param source number
+---@return string | nil
+local function getUserIdentifier(source)
+    local identifier = GetPlayerIdentifierByType(source --[[@as string]], 'discord')
+
+    return identifier and string.gsub(identifier, 'discord:', '')
+end
+
+---@param source number
+---@return string | nil, table | nil
+local function getUserInfo(source)
+    local userID, roles = getUserIdentifier(source), nil
+    local user = userID and sendRequest(userID)
+
+    if user?.code == 200 then
+        ---@diagnostic disable-next-line: need-check-nil
+        local data = json.decode(user.data)
+
+        roles = data.roles
+    end
+
+    return userID, roles
+end
+
+---@param source number
+---@param permission string | table
+local function hasPermission(source, permission)
+    local user, value = Players[source], false
 
     if type(permission) == 'table' then
         for i = 1, #permission do
             local perm = permission[i]
 
             if user.Permissions[perm] then
-                hasPermission = true
+                value = true
                 break
             end
         end
     else
         if user.Permissions[permission] then
-            hasPermission = true
+            value = true
         end
     end
 
-    return hasPermission
+    return value
+end
+exports('hasPermission', hasPermission)
+
+local function addPermission(source, permission)
+    ExecuteCommand(('add_principal player.%s group.%s'):format(source, permission))
+    debugPrint('success', ('The %s permission has been added to player.%s'):format(permission, source))
 end
 
-exports('hasPermission', Scully.Discord.HasPermission)
-
-AddEventHandler('playerConnecting', function(name, setKickReason, deferrals)
+AddEventHandler('playerConnecting', function(_, _, _)
 	local src = source
-    local userID, userRoles = Scully.Discord.GetUserInfo(src)
+    local userID, userRoles = getUserInfo(src)
     local userPermissions = {}
 
     if not userRoles then
-        print('^1ERROR: ^7Could not find the players discord info, make sure the bot is invited to your server that the token is connected to.')
+        debugPrint('error', 'Failed to fetch user roles, make sure the bot is invited to your server and that the token is correct.')
         return
     end
 
-    for permission, role in pairs(Scully.Permissions) do
+    for permission, role in pairs(Config.Permissions) do
         for i = 1, #userRoles do
             local v = userRoles[i]
 
@@ -100,45 +132,36 @@ AddEventHandler('playerConnecting', function(name, setKickReason, deferrals)
                     if roleid == v then
                         userPermissions[permission] = true
 
-                        ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userID, permission))
-
-                        if Scully.Debug then
-                            print('^5[scully_perms] ^7Permission added: ^5[^2' .. userID .. ' : ' .. permission .. '^5]^7')
-                        end
+                        addPermission(src, permission)
                     end
                 end
             else
                 if role == v then
                     userPermissions[permission] = true
 
-                    ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userID, permission))
-
-                    if Scully.Debug then
-                        print('^5[scully_perms] ^7Permission added: ^5[^2' .. userID .. ' : ' .. permission .. '^5]^7')
-                    end
+                    addPermission(src, permission)
                 end
             end
         end
     end
 
-    Scully.Discord.Players[src] = {
+    Players[src] = {
         ID = userID,
         Roles = userRoles,
         Permissions = userPermissions
     }
 end)
 
-AddEventHandler('playerDropped', function(reason)
+AddEventHandler('playerDropped', function(_)
 	local src = source
-    local user = Scully.Discord.Players[src]
+    local user = Players[src]
+
     if user then
-        local userPermissions = user.Permissions
-        for _, permission in ipairs(userPermissions) do
-            ExecuteCommand(('remove_principal identifier.discord:%s group.%s'):format(user.ID, permission))
-            if Scully.Debug then
-                print('^5[scully_perms] ^7Permission removed: ^5[^1' .. user.ID .. ' : ' .. permission .. '^5]^7')
-            end
+        for permission, _ in pairs(user.Permissions) do
+            ExecuteCommand(('remove_principal player.%s group.%s'):format(source, permission))
+            debugPrint('success', ('The %s permission has been removed from player.%s'):format(permission, source))
         end
+
+        Players[src] = nil
     end
-    Scully.Discord.Players[src] = nil
 end)
