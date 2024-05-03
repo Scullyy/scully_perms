@@ -106,9 +106,11 @@ local function hasPermission(source, permission)
 end
 exports('hasPermission', hasPermission)
 
-local function addPermission(source, permission)
-    ExecuteCommand(('add_principal player.%s group.%s'):format(source, permission))
-    debugPrint('success', ('The %s permission has been added to player.%s'):format(permission, source))
+---@param userId string
+---@param permission string
+local function addPermission(userId, permission)
+    ExecuteCommand(('add_principal identifier.discord:%s group.%s'):format(userId, permission))
+    debugPrint('success', ('The %s permission has been added to %s'):format(permission, userId))
 end
 
 AddEventHandler('playerConnecting', function(_, _, _)
@@ -158,8 +160,8 @@ AddEventHandler('playerDropped', function(_)
 
     if user then
         for permission, _ in pairs(user.Permissions) do
-            ExecuteCommand(('remove_principal player.%s group.%s'):format(source, permission))
-            debugPrint('success', ('The %s permission has been removed from player.%s'):format(permission, source))
+            ExecuteCommand(('remove_principal identifier.discord:%s group.%s'):format(user.ID, permission))
+            debugPrint('success', ('The %s permission has been removed from %s'):format(permission, user.ID))
         end
 
         Players[src] = nil
