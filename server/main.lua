@@ -113,8 +113,8 @@ local function addPermission(userId, permission)
     debugPrint('success', ('The %s permission has been added to %s'):format(permission, userId))
 end
 
-AddEventHandler('playerConnecting', function(_, _, _)
-	local src = source
+AddEventHandler('playerJoining', function(_)
+    local src = source --[[@as number]]
     local userID, userRoles = getUserInfo(src)
     local userPermissions = {}
 
@@ -134,14 +134,14 @@ AddEventHandler('playerConnecting', function(_, _, _)
                     if roleid == v then
                         userPermissions[permission] = true
 
-                        addPermission(src, permission)
+                        addPermission(userID --[[@as string]], permission)
                     end
                 end
             else
                 if role == v then
                     userPermissions[permission] = true
 
-                    addPermission(src, permission)
+                    addPermission(userID --[[@as string]], permission)
                 end
             end
         end
@@ -155,7 +155,7 @@ AddEventHandler('playerConnecting', function(_, _, _)
 end)
 
 AddEventHandler('playerDropped', function(_)
-	local src = source
+    local src = source --[[@as number]]
     local user = Players[src]
 
     if user then
