@@ -190,7 +190,6 @@ AddEventHandler('playerJoining', function(_)
     }
 end)
 
-
 AddEventHandler('playerDropped', function(_)
     local src = source --[[@as number]]
     local user = Players[src]
@@ -211,39 +210,41 @@ CreateThread(function()
         if not lock then
             lock = true
             for src, player in pairs(Players) do
-                local userID, userRoles = getUserInfo(src)
-                if userID and userRoles then
-                    local userPermissions = {}
-                    for _, roleData in ipairs(userRoles) do
-                        local guildData = Config.Guilds[roleData.guild]
-                        if guildData then
-                            for permission, role in pairs(guildData.Permissions) do
-                                if type(role) == 'table' then
-                                    for _, roleId in ipairs(role) do
-                                        if roleId == roleData.role then
+                if player then
+                    local userID, userRoles = getUserInfo(src)
+                    if userID and userRoles then
+                        local userPermissions = {}
+                        for _, roleData in ipairs(userRoles) do
+                            local guildData = Config.Guilds[roleData.guild]
+                            if guildData then
+                                for permission, role in pairs(guildData.Permissions) do
+                                    if type(role) == 'table' then
+                                        for _, roleId in ipairs(role) do
+                                            if roleId == roleData.role then
+                                                userPermissions[permission] = true
+                                                if not player.Permissions[permission] then
+                                                    addPermission(userID, permission)
+                                                end
+                                            end
+                                        end
+                                    else
+                                        if role == roleData.role then
                                             userPermissions[permission] = true
                                             if not player.Permissions[permission] then
                                                 addPermission(userID, permission)
                                             end
                                         end
                                     end
-                                else
-                                    if role == roleData.role then
-                                        userPermissions[permission] = true
-                                        if not player.Permissions[permission] then
-                                            addPermission(userID, permission)
-                                        end
-                                    end
                                 end
                             end
                         end
-                    end
-                    for permission in pairs(player.Permissions) do
-                        if not userPermissions[permission] then
-                            removePermission(userID, permission)
+                        for permission in pairs(player.Permissions) do
+                            if not userPermissions[permission] then
+                                removePermission(userID, permission)
+                            end
                         end
+                        Players[src].Permissions = userPermissions
                     end
-                    Players[src].Permissions = userPermissions
                 end
             end
             lock = false
