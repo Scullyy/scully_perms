@@ -24,33 +24,45 @@ local function debugPrint(prefix, message)
     print(('%s ^7%s'):format(prefix, message))
 end
 
-if Config.Guild == '' or Config.Token == '' then
-    debugPrint('error', 'You need to configure your guild and token in the config.lua')
+if not Config or not Config.Token or Config.Token == '' then
+    debugPrint('error', 'You need to configure your bot token in the config.lua')
+    return
+end
+
+if not Config.Guilds or next(Config.Guilds) == nil then
+    debugPrint('error', 'You need to configure your guilds in the config.lua')
     return
 end
 
 ---@param userId string
+---@param guildId string
 ---@return table | false
-local function sendRequest(userId)
+local function sendRequest(userId, guildId)
     local data = nil
-    local request = ('https://discord.com/api/guilds/%s/members/%s'):format(Config.Guild, userId)
+    local request = ('https://discord.com/api/guilds/%s/members/%s'):format(guildId, userId)
 
     PerformHttpRequest(request, function(code, result, headers)
+        if not result then
+            debugPrint('error', 'Failed to get a response from the server.')
+            return
+        end
         data = { data = result, code = code, headers = headers }
         local error = ApiCodes[code]
-
-        debugPrint(error.bad and 'error' or 'success', error.text)
+        if error then
+            debugPrint(error.bad and 'error' or 'success', error.text)
+        else
+            debugPrint('error', 'Unknown response code: ' .. code)
+        end
     end, 'GET', '', {['Content-Type'] = 'application/json', ['Authorization'] = 'Bot ' .. Config.Token})
 
     local start = GetGameTimer()
 
     while not data do
-        Wait(0)
-
+        Wait(100)  -- Small wait to reduce CPU usage
         local timer = GetGameTimer() - start
 
-        if timer > 15000 then
-            debugPrint('error', 'The request timed out.')
+        if timer > Config.MaxRefreshTime then
+            debugPrint('error', 'The request timed out (Discord). Please increase the MaxRefreshTime in config.lua if you have a big server.')
             return false
         end
     end
@@ -69,18 +81,39 @@ end
 ---@param source number
 ---@return string | nil, table | nil
 local function getUserInfo(source)
-    local userID, roles = getUserIdentifier(source), nil
-    local user = userID and sendRequest(userID)
+    local userID, roles = getUserIdentifier(source), {}
 
-    if user?.code == 200 then
-        ---@diagnostic disable-next-line: need-check-nil
-        local data = json.decode(user.data)
+    if userID then
+        local rolesFound = false
+        for guildName, guildData in pairs(Config.Guilds) do
+            local user = sendRequest(userID, guildData.GuildID)
+            if user then
+                if user.code == 200 then
+                    local data = json.decode(user.data)
+                    if data.roles then
+                        for _, role in ipairs(data.roles) do
+                            table.insert(roles, { role = role, guild = guildName })
+                        end
+                        rolesFound = true
+                    end
+                else
+                    debugPrint('error', 'Failed to fetch user roles for guild: ' .. guildName)
+                end
+            else
+                debugPrint('error', 'Failed to send request for user info for guild: ' .. guildName)
+            end
+        end
 
-        roles = data.roles
+        if not rolesFound then
+            debugPrint('error', 'Failed to fetch user roles (if any), make sure the bot is invited to your servers and that the token is correct.')
+        end
+    else
+        debugPrint('error', 'Failed to get user identifier.')
     end
 
     return userID, roles
 end
+
 
 ---@param source number
 ---@param permission string | table
@@ -113,35 +146,38 @@ local function addPermission(userId, permission)
     debugPrint('success', ('The %s permission has been added to %s'):format(permission, userId))
 end
 
+---@param userId string
+---@param permission string
+local function removePermission(userId, permission)
+    ExecuteCommand(('remove_principal identifier.discord:%s group.%s'):format(userId, permission))
+    debugPrint('success', ('The %s permission has been removed from %s'):format(permission, userId))
+end
+
 AddEventHandler('playerJoining', function(_)
     local src = source --[[@as number]]
     local userID, userRoles = getUserInfo(src)
     local userPermissions = {}
 
-    if not userRoles then
-        debugPrint('error', 'Failed to fetch user roles, make sure the bot is invited to your server and that the token is correct.')
-        return
-    end
-
-    for permission, role in pairs(Config.Permissions) do
-        for i = 1, #userRoles do
-            local v = userRoles[i]
-
-            if type(role) == 'table' then
-                for k = 1, #role do
-                    local roleid = role[k]
-
-                    if roleid == v then
-                        userPermissions[permission] = true
-
-                        addPermission(userID --[[@as string]], permission)
+    if not userRoles or #userRoles == 0 then
+        debugPrint('error', 'User has no roles in any server.')
+    else
+        for _, roleData in ipairs(userRoles) do
+            local guildData = Config.Guilds[roleData.guild]
+            if guildData then
+                for permission, role in pairs(guildData.Permissions) do
+                    if type(role) == 'table' then
+                        for _, roleId in ipairs(role) do
+                            if roleId == roleData.role then
+                                userPermissions[permission] = true
+                                addPermission(userID, permission)
+                            end
+                        end
+                    else
+                        if role == roleData.role then
+                            userPermissions[permission] = true
+                            addPermission(userID, permission)
+                        end
                     end
-                end
-            else
-                if role == v then
-                    userPermissions[permission] = true
-
-                    addPermission(userID --[[@as string]], permission)
                 end
             end
         end
@@ -160,10 +196,59 @@ AddEventHandler('playerDropped', function(_)
 
     if user then
         for permission, _ in pairs(user.Permissions) do
-            ExecuteCommand(('remove_principal identifier.discord:%s group.%s'):format(user.ID, permission))
-            debugPrint('success', ('The %s permission has been removed from %s'):format(permission, user.ID))
+            removePermission(user.ID, permission)
         end
 
         Players[src] = nil
+    end
+end)
+
+local lock = false
+
+CreateThread(function()
+    while true do
+        if not lock then
+            lock = true
+            for src, player in pairs(Players) do
+                if player then
+                    local userID, userRoles = getUserInfo(src)
+                    if userID and userRoles then
+                        local userPermissions = {}
+                        for _, roleData in ipairs(userRoles) do
+                            local guildData = Config.Guilds[roleData.guild]
+                            if guildData then
+                                for permission, role in pairs(guildData.Permissions) do
+                                    if type(role) == 'table' then
+                                        for _, roleId in ipairs(role) do
+                                            if roleId == roleData.role then
+                                                userPermissions[permission] = true
+                                                if not player.Permissions[permission] then
+                                                    addPermission(userID, permission)
+                                                end
+                                            end
+                                        end
+                                    else
+                                        if role == roleData.role then
+                                            userPermissions[permission] = true
+                                            if not player.Permissions[permission] then
+                                                addPermission(userID, permission)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        for permission in pairs(player.Permissions) do
+                            if not userPermissions[permission] then
+                                removePermission(userID, permission)
+                            end
+                        end
+                        Players[src].Permissions = userPermissions
+                    end
+                end
+            end
+            lock = false
+        end
+        Wait(Config.RefreshThrottle)
     end
 end)
